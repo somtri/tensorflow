@@ -329,8 +329,10 @@ class NearestNeighborsOp : public OpKernel {
         points_tensor.matrix<float>().data(), num_points, point_dimensions);
     const Eigen::Map<const MatrixXfRowMajor> centers(
         centers_tensor.matrix<float>().data(), num_centers, center_dimensions);
-    const int64_t k =
-        std::min<int64_t>(num_centers, k_tensor.scalar<int64_t>()());
+    const int64_t k_tensor_val = k_tensor.scalar<int64_t>()();
+    OP_REQUIRES(context, k_tensor_val >= 0,
+                absl::InvalidArgumentError("Expected k >= 0."));
+    const int64_t k = std::min<int64_t>(num_centers, k_tensor_val);
 
     Tensor* output_nearest_center_indices_tensor;
     Tensor* output_nearest_center_distances_tensor;
