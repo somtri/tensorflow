@@ -237,8 +237,8 @@ void UnigramSampler::Update(absl::Span<const int64_t> values) {
 }
 
 FixedUnigramSampler::FixedUnigramSampler(int64_t range, float distortion,
-                                         int32_t num_reserved_ids,
-                                         int32_t num_shards, int32_t shard)
+                                         int64_t num_reserved_ids,
+                                         int64_t num_shards, int64_t shard)
     : RangeSampler(range),
       total_weight_(0.0),
       num_shards_(num_shards),
@@ -280,8 +280,8 @@ int64_t FixedUnigramSampler::Sample(random::SimplePhilox* rnd) const {
   return dist_sampler_->Sample(rnd);
 }
 
-void FixedUnigramSampler::FillReservedIds(int32_t num_reserved_ids) {
-  for (int32_t word_id = 0; word_id < num_reserved_ids; ++word_id) {
+void FixedUnigramSampler::FillReservedIds(int64_t num_reserved_ids) {
+  for (int64_t word_id = 0; word_id < num_reserved_ids; ++word_id) {
     if (word_id % num_shards_ == shard_) weights_.push_back(0.0);
   }
 }
@@ -294,7 +294,7 @@ absl::Status FixedUnigramSampler::LoadFromFile(Env* env,
 
   io::InputBuffer in(file.get(), 262144 /*bytes*/);
   std::string line;
-  int32_t word_id = weights_.size();
+  int64_t word_id = weights_.size();
   while (in.ReadLine(&line).ok()) {
     // The vocabulary file should be in csv like format, with the last
     // field the weight associated with the word.
@@ -318,7 +318,7 @@ absl::Status FixedUnigramSampler::LoadFromFile(Env* env,
 
 void FixedUnigramSampler::LoadFromUnigrams(const std::vector<float>& unigrams,
                                            float distortion) {
-  int32_t word_id = weights_.size();
+  int64_t word_id = weights_.size();
   for (float w : unigrams) {
     // Skip entries that do not belong to this shard.
     if (word_id % num_shards_ == shard_) {

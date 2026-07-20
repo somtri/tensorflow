@@ -15,19 +15,18 @@ limitations under the License.
 
 // See docs in ../ops/candidate_sampling_ops.cc.
 
+#include <cfloat>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/types/span.h"
 #define EIGEN_USE_THREADS
-
-#include <cfloat>
-#include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "tensorflow/core/framework/op_kernel.h"
@@ -254,19 +253,20 @@ class ComputeAccidentalHitsOp : public OpKernel {
     }
 
     Tensor* out_indices = nullptr;
-    OP_REQUIRES_OK(
-        context,
-        context->allocate_output(
-            0, TensorShape({static_cast<int>(indices.size())}), &out_indices));
+    OP_REQUIRES_OK(context,
+                   context->allocate_output(
+                       0, TensorShape({static_cast<int64_t>(indices.size())}),
+                       &out_indices));
     Tensor* out_ids = nullptr;
     OP_REQUIRES_OK(
-        context, context->allocate_output(
-                     1, TensorShape({static_cast<int>(ids.size())}), &out_ids));
-    Tensor* out_weights = nullptr;
-    OP_REQUIRES_OK(
         context,
         context->allocate_output(
-            2, TensorShape({static_cast<int>(weights.size())}), &out_weights));
+            1, TensorShape({static_cast<int64_t>(ids.size())}), &out_ids));
+    Tensor* out_weights = nullptr;
+    OP_REQUIRES_OK(context,
+                   context->allocate_output(
+                       2, TensorShape({static_cast<int64_t>(weights.size())}),
+                       &out_weights));
 
     for (size_t i = 0; i < indices.size(); ++i) {
       out_indices->vec<int32_t>()(i) = indices[i];
