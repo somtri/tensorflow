@@ -34,7 +34,15 @@ namespace gpu {
 // index is used to access the source tensor. Otherwise, dimensional indices
 // computed from the linear index are used to access the source tensor.
 
-class GpuIndexTest : public GpuPjRtCodegenTest {};
+class GpuIndexTest : public GpuPjRtCodegenTest {
+ public:
+  GpuIndexTest() {
+    absl::SetVLogLevel("config_assigner*", 10);
+    absl::SetVLogLevel("codegen_orchestrator*", 10);
+    absl::SetVLogLevel("cudnn*", 10);
+    absl::SetVLogLevel("hipblaslt*", 10);
+  }
+};
 
 TEST_F(GpuIndexTest, CompatibleUseLinearIndex) {
   HloComputation::Builder builder(TestName());
