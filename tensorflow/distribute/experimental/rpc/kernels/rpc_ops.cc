@@ -602,6 +602,7 @@ void RpcClientOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   auto* response = new ListResponse();
   client->ListAsync(
       response, [ctx, response, done](const absl::Status& status) {
+        std::unique_ptr<ListResponse> safe_response(response);
         if (!status.ok()) {
           ctx->SetStatus(status);
         } else {
@@ -620,7 +621,6 @@ void RpcClientOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
                 response->registered_methods(i).SerializeAsString();
           }
         }
-        delete response;
         done();
       });
 }
@@ -843,6 +843,16 @@ void RpcGetValueOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
               if (!t.FromProto(t_proto)) {
                 ctx->SetStatus(absl::InternalError(
                     "Invalid Tensor Proto response returned."));
+                done();
+                return;
+              }
+              if (t.dtype() != ctx->expected_output_dtype(i)) {
+                ctx->SetStatus(absl::InvalidArgumentError(
+                    absl::StrCat("Type mismatch for output tensor. Expected: ",
+                                 DataTypeString(ctx->expected_output_dtype(i)),
+                                 " but got: ", DataTypeString(t.dtype()))));
+                done();
+                return;
               }
               ctx->set_output(i++, std::move(t));
             }
