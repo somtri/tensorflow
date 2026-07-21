@@ -32,14 +32,15 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "xla/tsl/platform/status_macros.h"
 #include "mlir/IR/MLIRContext.h"
+#include "xla/backends/autotuner/autotune_cache_store.h"
 #include "xla/backends/autotuner/autotuner_cache_interface.h"
 #include "xla/backends/autotuner/backends.pb.h"
 #include "xla/backends/autotuner/codegen_backend.h"
 #include "xla/backends/autotuner/codegen_orchestrator.h"
 #include "xla/backends/autotuner/config_assigner.h"
-#include "xla/backends/autotuner/directory_cache.h"
+#include "xla/backends/autotuner/directory_store.h"
 #include "xla/backends/autotuner/hlo_extractor.h"
-#include "xla/backends/autotuner/local_cache.h"
+#include "xla/backends/autotuner/in_memory_store.h"
 #include "xla/backends/autotuner/profiler.h"
 #include "xla/backends/autotuner/tiered_cache.h"
 #include "xla/backends/gpu/autotuner/factory.h"
@@ -234,32 +235,26 @@ std::unique_ptr<AutotunerCacheInterface> CreateAutotunerCache(
     const DebugOptions& debug_options,
     const Compiler::GpuTargetConfig& target_config,
     const std::vector<std::unique_ptr<CodegenBackend>>& backends) {
-  std::string legacy_cache_dir =
-      debug_options.xla_gpu_per_fusion_autotune_cache_dir();
-  std::string new_cache_dir =
-      debug_options.xla_gpu_experimental_autotuner_cache_dir();
-  if (!new_cache_dir.empty() && !legacy_cache_dir.empty()) {
-    LOG(WARNING) << "Both legacy and new autotune cache directories are set. "
-                    "Using the new directory: "
-                 << new_cache_dir;
-  }
-  if (!new_cache_dir.empty()) {
-    AutotuneCacheContext cache_ctx = AutotuneCacheContext::Create(
-        target_config.device_description, backends);
+  std::string cache_dir = debug_options.xla_gpu_per_fusion_autotune_cache_dir();
 
-    auto dir_cache = std::make_unique<DirectoryCache>(
-        cache_ctx, new_cache_dir,
-        GetCacheMode(debug_options.xla_gpu_experimental_autotune_cache_mode()),
-        KeyMatchingMode::kLoose);
-    auto local_cache = std::make_unique<LocalCache>(
-        cache_ctx, dir_cache->GetKeyMatchingMode());
-    return std::make_unique<TieredCache>(std::move(local_cache),
-                                         std::move(dir_cache));
+  if (!debug_options.xla_gpu_use_new_autotune_cache_format()) {
+    return std::make_unique<LegacyCache>(
+        cache_dir, debug_options.xla_gpu_experimental_autotune_cache_mode(),
+        target_config.device_description);
   }
-  return std::make_unique<LegacyCache>(
-      legacy_cache_dir,
-      debug_options.xla_gpu_experimental_autotune_cache_mode(),
-      target_config.device_description);
+
+  AutotuneCacheContext cache_ctx =
+      AutotuneCacheContext::Create(target_config.device_description, backends);
+  auto primary = std::make_unique<InMemoryStore>();
+  std::unique_ptr<AutotuneCacheStore> secondary = nullptr;
+  if (!cache_dir.empty()) {
+    secondary = std::make_unique<DirectoryStore>(
+        cache_dir,
+        GetCacheMode(debug_options.xla_gpu_experimental_autotune_cache_mode()));
+  }
+  return std::make_unique<TieredCache>(cache_ctx, KeyMatchingMode::kLoose,
+                                       std::move(primary),
+                                       std::move(secondary));
 }
 
 }  // namespace

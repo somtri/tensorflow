@@ -19,26 +19,38 @@ limitations under the License.
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
+#include "absl/base/thread_annotations.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
+#include "xla/backends/autotuner/autotune_cache_store.h"
 #include "xla/backends/autotuner/autotuner_cache_interface.h"
+#include "xla/backends/autotuner/autotuning.pb.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 
 namespace xla {
 
-// TieredCache combines a primary cache (e.g. local in-memory L1 cache)
-// and a secondary cache (e.g. persistent L2 cache) into a single interface.
+// TieredCache is the single AutotunerCacheInterface implementation. It owns an
+// ordered list of AutotuneCacheStore tiers (hottest first, e.g. an in-memory L1
+// followed by a directory L2) and centralizes all of the logic that used to be
+// duplicated across cache implementations:
+//   - building the AutotuneTargetKey / AutotuneKey from an instruction. The
+//     expensive instruction fingerprinting happens exactly ONCE per operation
+//     and is shared across all tiers (previously each tier re-hashed).
+//   - strict/loose environment matching.
+//   - AutotuneCache proto (de)serialization.
 //
-// Read requests check the primary cache first. On a miss, they query the
-// secondary cache and populate the primary cache with the result on a hit.
-// Write requests update both the primary and secondary caches.
+// Lookups query tiers in order and, on a hit in a colder tier, promote the
+// matched entry into all hotter tiers. Inserts write to every writable tier.
 class TieredCache : public AutotunerCacheInterface {
  public:
-  TieredCache(std::unique_ptr<AutotunerCacheInterface> primary_cache,
-              std::unique_ptr<AutotunerCacheInterface> secondary_cache);
+  TieredCache(AutotuneCacheContext context, KeyMatchingMode matching_mode,
+              std::unique_ptr<AutotuneCacheStore> primary,
+              std::unique_ptr<AutotuneCacheStore> secondary = nullptr);
 
   ~TieredCache() override = default;
 
@@ -49,21 +61,44 @@ class TieredCache : public AutotunerCacheInterface {
 
   CacheStats GetCacheStats() const override;
 
-  // Serialize from the secondary cache.
+  // Serializes the entries from `instructions_to_serialize` (or all entries if
+  // the span is empty) into an AutotuneCache proto.
   absl::StatusOr<std::string> Serialize(absl::Span<const HloInstruction* const>
                                             instructions_to_serialize) override;
 
-  // Deserialize updates both the primary and secondary caches.
+  // Deserializes an AutotuneCache proto into the cache.
   absl::Status Deserialize(absl::string_view serialized_cache) override;
 
-  CacheMode GetMode() const override { return secondary_cache_->GetMode(); }
-  KeyMatchingMode GetKeyMatchingMode() const override {
-    return secondary_cache_->GetKeyMatchingMode();
-  }
+  CacheMode GetMode() const override;
+  KeyMatchingMode GetKeyMatchingMode() const override { return matching_mode_; }
 
  private:
-  std::unique_ptr<AutotunerCacheInterface> primary_cache_;
-  std::unique_ptr<AutotunerCacheInterface> secondary_cache_;
+  // Builds the target key (device, explicit_version, hlo_fingerprint) for the
+  // instruction. This is the sole caller of GetHloFingerprint on the hot path.
+  autotuner::AutotuneTargetKey BuildTargetKey(
+      const HloInstruction& instr) const;
+
+  // Builds a full entry (key + value) for insertion.
+  autotuner::AutotuneEntry BuildEntry(const HloInstruction& instr,
+                                      const Config& config) const;
+
+  // Returns the first entry from `entries` that matches the current context
+  // (and, in strict mode, `codegen_options_fp`), or nullopt.
+  std::optional<autotuner::AutotuneEntry> MatchEntry(
+      const std::vector<autotuner::AutotuneEntry>& entries,
+      const std::optional<std::string>& codegen_options_fp) const;
+
+  // Writes `entry` to `store` honoring the store's CacheMode.
+  absl::Status WriteToStore(AutotuneCacheStore& store,
+                            const autotuner::AutotuneEntry& entry) const;
+
+  AutotuneCacheContext context_;
+  KeyMatchingMode matching_mode_;
+  std::unique_ptr<AutotuneCacheStore> primary_;
+  std::unique_ptr<AutotuneCacheStore> secondary_;
+
+  mutable absl::Mutex stats_mutex_;
+  CacheStats stats_ ABSL_GUARDED_BY(stats_mutex_);
 };
 
 }  // namespace xla
