@@ -517,6 +517,7 @@ xla_test(
         "//xla/tsl/platform:test_main",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
         "@llvm-project//mlir:IR",
     ],
